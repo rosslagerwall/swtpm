@@ -104,12 +104,22 @@ TPM_RESULT tpmlib_choose_tpm_version(TPMLIB_TPMVersion tpmversion)
     return res;
 }
 
-TPM_RESULT tpmlib_start(uint32_t flags, TPMLIB_TPMVersion tpmversion)
+TPM_RESULT tpmlib_start(uint32_t flags, TPMLIB_TPMVersion tpmversion,
+                        const char *json_profile)
 {
     TPM_RESULT res;
 
     if ((res = tpmlib_choose_tpm_version(tpmversion)) != TPM_SUCCESS)
         return res;
+
+#ifdef HAVE_LIBTPMS_SETPROFILE_API
+    if (json_profile != NULL && tpmversion == TPMLIB_TPM_VERSION_2 &&
+        (res = TPMLIB_SetProfile(json_profile)) != TPM_SUCCESS) {
+        logprintf(STDERR_FILENO,
+                  "Error: Could not set profile for TPM2.\n");
+        return res;
+    }
+#endif
 
     if ((res = TPMLIB_MainInit()) != TPM_SUCCESS) {
         logprintf(STDERR_FILENO,

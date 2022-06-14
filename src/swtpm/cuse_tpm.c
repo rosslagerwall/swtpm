@@ -110,6 +110,9 @@ static uint32_t locality_flags;
 /* the fuse_session that we will signal an exit to to exit the prg. */
 static struct fuse_session *ptm_fuse_session;
 
+/* the JSON profile for the TPM 2 */
+static char *g_json_profile;
+
 #if GLIB_MAJOR_VERSION >= 2
 # if GLIB_MINOR_VERSION >= 32
 
@@ -137,6 +140,7 @@ struct cuse_param {
     char *tpmstatedata;
     char *localitydata;
     char *seccompdata;
+    char *profiledata;
     unsigned int seccomp_action;
     char *flagsdata;
     uint16_t startupType;
@@ -431,7 +435,7 @@ static void worker_thread(gpointer data, gpointer user_data SWTPM_ATTR_UNUSED)
  * @res: the result from starting the TPM
  */
 static int tpm_start(uint32_t flags, TPMLIB_TPMVersion l_tpmversion,
-                     TPM_RESULT *res)
+                     const char *json_profile, TPM_RESULT *res)
 {
     DIR *dir;
     const char *uri = tpmstate_get_backend_uri();
@@ -470,7 +474,7 @@ static int tpm_start(uint32_t flags, TPMLIB_TPMVersion l_tpmversion,
         goto error_del_pool;
     }
 
-    *res = tpmlib_start(flags, l_tpmversion);
+    *res = tpmlib_start(flags, l_tpmversion, json_profile);
     if (*res != TPM_SUCCESS)
         goto error_del_pool;
 
@@ -1056,7 +1060,8 @@ static void ptm_ioctl(fuse_req_t req, int cmd, void *arg,
             TPMLIB_Terminate();
 
             tpm_running = false;
-            if (tpm_start(init_p->u.req.init_flags, tpmversion, &res) < 0) {
+            if (tpm_start(init_p->u.req.init_flags, tpmversion,
+                          g_json_profile, &res) < 0) {
                 logprintf(STDERR_FILENO,
                           "Error: Could not initialize the TPM.\n");
             } else {
@@ -1456,6 +1461,9 @@ int swtpm_cuse_main(int argc, char **argv, const char *prgname, const char *ifac
         {"print-capabilities"
                          ,       no_argument, 0, 'a'},
         {"print-states"  ,       no_argument, 0, 'e'},
+#ifdef HAVE_LIBTPMS_SETPROFILE_API
+        {"profile"       , required_argument, 0, 'R'},
+#endif
         {NULL            , 0                , 0, 0  },
     };
     struct cuse_info cinfo;
@@ -1564,6 +1572,9 @@ int swtpm_cuse_main(int argc, char **argv, const char *prgname, const char *ifac
         case 'S':
             param.seccompdata = optarg;
             break;
+        case 'R':
+            param.profiledata = optarg;
+            break;
         case 'h': /* help */
             fprintf(stdout, usage, prgname, iface);
             goto exit;
@@ -1656,7 +1667,8 @@ int swtpm_cuse_main(int argc, char **argv, const char *prgname, const char *ifac
         handle_seccomp_options(param.seccompdata, &param.seccomp_action) < 0 ||
         handle_locality_options(param.localitydata, &locality_flags) < 0 ||
         handle_flags_options(param.flagsdata, &need_init_cmd,
-                             &param.startupType) < 0) {
+                             &param.startupType) < 0 ||
+        handle_profile_options(param.profiledata, &g_json_profile) < 0) {
         ret = -3;
         goto exit;
     }
@@ -1707,7 +1719,7 @@ int swtpm_cuse_main(int argc, char **argv, const char *prgname, const char *ifac
     worker_thread_init();
 
     if (!need_init_cmd) {
-        if (tpm_start(0, tpmversion, &res) < 0) {
+        if (tpm_start(0, tpmversion, g_json_profile, &res) < 0) {
             ret = -1;
             goto exit;
         }
@@ -1730,6 +1742,7 @@ int swtpm_cuse_main(int argc, char **argv, const char *prgname, const char *ifac
     ret = ptm_cuse_lowlevel_main(1, argv, &cinfo, &clops, &param);
 
 exit:
+    free(g_json_profile);
     ptm_cleanup();
     free(cinfo_argv[0]);
 

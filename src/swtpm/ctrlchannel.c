@@ -560,7 +560,7 @@ int ctrlchannel_process_fd(int fd,
 
         *tpm_running = false;
         res = tpmlib_start(be32toh(init_p->u.req.init_flags),
-                           mlp->tpmversion);
+                           mlp->tpmversion, NULL);
         if (res) {
             logprintf(STDERR_FILENO,
                       "Error: Could not initialize the TPM\n");
