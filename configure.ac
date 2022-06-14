@@ -186,6 +186,12 @@ AC_CHECK_LIB(tpms,
              TPMLIB_ChooseTPMVersion,[true],
              AC_MSG_ERROR("libtpms 0.6 or later is required")
 )
+AC_CHECK_LIB(tpms,
+             [TPMLIB_SetProfile],
+             [AC_DEFINE_UNQUOTED([HAVE_LIBTPMS_SETPROFILE_API], 1,
+                                 [whether TPMLIB_SetProfile API is available])]
+)
+
 AC_SUBST([LIBTPMS_LIBS])
 
 AC_CHECK_LIB(c, clock_gettime, LIBRT_LIBS="", LIBRT_LIBS="-lrt")
