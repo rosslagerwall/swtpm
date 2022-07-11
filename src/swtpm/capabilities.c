@@ -129,6 +129,12 @@ int capabilities_print_json(bool cusetpm, TPMLIB_TPMVersion tpmversion)
     char *keysizecaps = NULL;
     const char *nvram_backend_dir = "\"nvram-backend-dir\", ";
     const char *nvram_backend_file = "\"nvram-backend-file\"";
+#ifdef HAVE_LIBTPMS_SETPROFILE_API
+    const char *cmdarg_profile = "\"cmdarg-profile\"";
+#else
+    const char *cmdarg_profile = NULL;
+#endif
+    bool comma1;
 
     if (TPMLIB_ChooseTPMVersion(tpmversion) != TPM_SUCCESS) {
         logprintf(STDERR_FILENO, "Could not choose TPM version.\n");
@@ -144,11 +150,13 @@ int capabilities_print_json(bool cusetpm, TPMLIB_TPMVersion tpmversion)
     if (TPMLIB_ChooseTPMVersion(TPMLIB_TPM_VERSION_2) == TPM_SUCCESS)
         with_tpm2 = "\"tpm-2.0\", ";
 
+    comma1 = keysizecaps || cmdarg_profile;
+
     n =  asprintf(&string,
          "{ "
          "\"type\": \"swtpm\", "
          "\"features\": [ "
-             "%s%s%s%s%s%s%s%s%s%s%s"
+             "%s%s%s%s%s%s%s%s%s%s%s%s%s"
           " ], "
          "\"version\": \"" VERSION "\" "
          "}",
@@ -162,7 +170,9 @@ int capabilities_print_json(bool cusetpm, TPMLIB_TPMVersion tpmversion)
          true         ? "\"cmdarg-print-states\", "    : "",
          nvram_backend_dir,
          nvram_backend_file,
-         keysizecaps  ? keysizecaps                    : ""
+         keysizecaps  ? keysizecaps                    : "",
+         comma1       ? ", "                           : "",
+         cmdarg_profile ? cmdarg_profile               : ""
     );
 
     if (n < 0) {
