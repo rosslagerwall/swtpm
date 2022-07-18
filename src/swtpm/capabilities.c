@@ -45,6 +45,8 @@
 #include <libtpms/tpm_library.h>
 #include <libtpms/tpm_error.h>
 
+#include <json-glib/json-glib.h>
+
 #include "capabilities.h"
 #include "logging.h"
 #include "swtpm_nvstore.h"
@@ -114,6 +116,74 @@ oom:
     goto cleanup;
 }
 
+#ifdef HAVE_LIBTPMS_SETPROFILE_API
+
+static int get_profiles(gchar **profiles)
+{
+    char *info_data = TPMLIB_GetInfo(32 /*TPMLIB_INFO_AVAILABLE_PROFILES*/);
+    JsonParser *jp = NULL;
+    JsonReader *jr = NULL;
+    GError *error = NULL;
+    JsonNode *root;
+    gint i, num;
+    int ret = 0;
+    GString *gstr = g_string_new(NULL);
+
+    jp = json_parser_new();
+
+    if (!json_parser_load_from_data(jp, info_data, -1, &error)) {
+        logprintf(STDERR_FILENO,
+                  "Could not parse JSON data: %s\n", error->message);
+        g_error_free(error);
+        goto error;
+    }
+
+    root = json_parser_get_root(jp);
+    jr = json_reader_new(root);
+
+    if (!json_reader_read_member(jr, "AvailableProfiles")) {
+        logprintf(STDERR_FILENO,
+                  "Missing 'AvailableProfiles' field: %s\n",
+                  info_data);
+        goto error_unref_jr;
+    }
+
+    num = json_reader_count_elements(jr);
+    for (i = 0; i < num; i++) {
+        if (!json_reader_read_element(jr, i) ||
+            !json_reader_read_member(jr, "name")) {
+            logprintf(STDERR_FILENO,
+                      "Failed to traverse JSON list.\n");
+            goto error_unref_jr;
+        }
+        g_string_append_printf(gstr, "%s\"%s\"",
+                               i > 0 ? ", " : " ",
+                               json_reader_get_string_value(jr));
+        json_reader_end_element(jr);
+        json_reader_end_element(jr);
+    }
+
+
+error_unref_jr:
+    g_object_unref(jr);
+
+error:
+    g_object_unref(jp);
+    *profiles = g_string_free(gstr, false);
+    free(info_data);
+
+    return ret;
+}
+
+#else
+
+static int get_profiles(gchar **profiles SWTPM_UNUSED)
+{
+    return 0;
+}
+
+#endif
+
 int capabilities_print_json(bool cusetpm, TPMLIB_TPMVersion tpmversion)
 {
     char *string = NULL;
@@ -130,6 +200,7 @@ int capabilities_print_json(bool cusetpm, TPMLIB_TPMVersion tpmversion)
     const char *nvram_backend_dir = "\"nvram-backend-dir\", ";
     const char *nvram_backend_file = "\"nvram-backend-file\"";
 #ifdef HAVE_LIBTPMS_SETPROFILE_API
+    g_autofree gchar *profiles = NULL;
     const char *cmdarg_profile = "\"cmdarg-profile\"";
 #else
     const char *cmdarg_profile = NULL;
@@ -145,6 +216,12 @@ int capabilities_print_json(bool cusetpm, TPMLIB_TPMVersion tpmversion)
     if (ret < 0)
         goto cleanup;
 
+    if (tpmversion == TPMLIB_TPM_VERSION_2) {
+        ret = get_profiles(&profiles);
+        if (ret < 0)
+            goto cleanup;
+    }
+
     if (TPMLIB_ChooseTPMVersion(TPMLIB_TPM_VERSION_1_2) == TPM_SUCCESS)
         with_tpm1 = "\"tpm-1.2\", ";
     if (TPMLIB_ChooseTPMVersion(TPMLIB_TPM_VERSION_2) == TPM_SUCCESS)
@@ -158,6 +235,9 @@ int capabilities_print_json(bool cusetpm, TPMLIB_TPMVersion tpmversion)
          "\"features\": [ "
              "%s%s%s%s%s%s%s%s%s%s%s%s%s"
           " ], "
+#ifdef HAVE_LIBTPMS_SETPROFILE_API
+         "\"profiles\": [%s ], "
+#endif
          "\"version\": \"" VERSION "\" "
          "}",
          with_tpm1,
@@ -173,6 +253,10 @@ int capabilities_print_json(bool cusetpm, TPMLIB_TPMVersion tpmversion)
          keysizecaps  ? keysizecaps                    : "",
          comma1       ? ", "                           : "",
          cmdarg_profile ? cmdarg_profile               : ""
+#ifdef HAVE_LIBTPMS_SETPROFILE_API
+                                                           ,
+         profiles     ? profiles                       : ""
+#endif
     );
 
     if (n < 0) {
